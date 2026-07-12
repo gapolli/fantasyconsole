@@ -1,0 +1,39 @@
+# Build artifacts
+/target/
+cargo-leaves.lock
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Temporary files
+tmp/
+*.tmp
+
+# Test fixtures with actual game content
+tests/fixtures/*.p8
+!tests/fixtures/.gitkeep
+
+# Debug builds
+debug/
+target/
+
+# Test files
+*.p8.png
+*.p8
+*.png
+*.json

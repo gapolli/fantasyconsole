@@ -1,0 +1,14 @@
+[build]
+incremental = true
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/OPT:REF"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-args=-Wl,-O1"]
+
+[alias]
+dev = "run --release --"
+test-all = "test --release"
+fmt = "fmt --all --"
+lint = "clippy -- -D warnings"
