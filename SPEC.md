@@ -2,7 +2,7 @@
 
 ## Overview
 
-FantasyConsole is an open-source virtual runtime machine engineered to execute PICO-8 style game cartridge configurations (plain-text `.p8` format), recreating the technical specifications of a retro fantasy system without breaking intellectual property bounds. The architecture implements a matching safe API built on top of a portable hardware abstraction layer wrapped with an SDL2 rendering backend.
+FantasyConsole is a polymorphic, open-source fantasy virtual machine and integrated development environment (IDE) built in Rust. It executes codebases matching both **PICO-8** (`.p8`) and **TIC-80** (`.tic`) specifications without infringing on intellectual property boundaries. The engine implements a decoupled software-rendered graphics rasterizer mapped onto a hardware abstraction layer via an SDL2 backend.
 
 **Version:** 0.1.0-dev  
 **License:** MIT  
@@ -10,83 +10,119 @@ FantasyConsole is an open-source virtual runtime machine engineered to execute P
 
 ---
 
-## Emulated Hardware Constraints
+## Hardware Architecture & Constraints
 
-| Parameter | Configuration Specification |
-| :--- | :--- |
-| **Display Resolution** | 128×128 pixels (square display) |
-| **Color Space** | 16-color index-mapped lookup table (fully remappable) |
-| **Hexadecimal Palettes**| #000000, #1D2B53, #7E2553, #008751, #AB5236, #5F574F, #C2C3C7, #FFF1E8, #FF004D, #FFA300, #FFEC27, #00E436, #29ADFF, #83769C, #FF77A8, #FFCCAA |
-| **Graphics Asset Bounds** | 256 addressable sprite slots inside a shared sheet (8×8 cells) |
-| **Tilemap Dimension Grid**| Standard 128×64 matrix block cell registry array |
-| **System Update Pace** | Fixed 60 frames per second regulated via monolithic frame loops |
-| **Virtual Addressable RAM**| 32 KB structural memory mapping block configuration |
+The engine dynamically reshapes its core structural allocations at boot time depending on the loaded cartridge metadata criteria:
 
----
+| Parameter | PICO-8 Core Mode Specification | TIC-80 Core Mode Specification |
+| :--- | :--- | :--- |
+| **Display Resolution** | 128×128 pixels (1:1 Ratio) | **240×136 pixels** (16:9 Widescreen Ratio) |
+| **Color Lookup (LUT)** | 16 fixed indexed slots | **16 fully custom dynamic RAM registers** |
+| **Addressable VRAM** | 8 KB screen buffer array | 16.32 KB screen buffer array |
+| **Graphics Asset Sheet**| 128×128 pixel sprite matrix | **Dual-bank 128×256 pixel asset matrix** |
+| **Tilemap Array Bounds**| 128×64 matrix block cells | **240×136 matrix block cells** |
+| **Input Hardware Caps** | 4 local/remote players × 6 buttons | 4 local/remote players × 6 buttons |
+| **Virtual Address Space**| 32 KB structural layout mapping | 96 KB linear memory mapping layout |
+| **Target Refresh Rate** | Stable 60 Frames Per Second (FPS) | Stable 60 Frames Per Second (FPS) |
 
-## Runtime API Surface (PICO-8 Core Compatible)
-
-### Graphics and Rasterization Subsystem
-
-| Function Signature | Technical Description |
-| :--- | :--- |
-| `cls(color)` | Clears either the active display space or active clipping window using a specific color index. |
-| `pset(x, y, color)` | Modifies a target screen coordinate applying active camera vectors and clipping boundaries. |
-| `line(x0, y0, x1, y1, color)` | Draws a single primitive line segment leveraging an unrolled CPU implementation of Bresenham's Algorithm. |
-| `circ(x, y, r, color)` | Draws a hollow circular perimeter primitive leveraging the classic Midpoint Circle Algorithm. |
-| `circfill(x, y, r, color)` | Draws a filled circle shape executing balanced parallel horizontal row rasterization routines. |
-| `spr(n, x, y, flip_x, flip_y)` | Renders an 8×8 pixel bitmap block with optional runtime hardware axis reflection parameters. |
-| `sspr(sx, sy, sw, sh, dx, dy, dw, dh, fx, fy)` | Samples and projects variable texture blocks executing native *Nearest-Neighbor* layout interpolation. |
-| `map(mx, my, sx, sy, w, h)` | Iterates and renders rows of structural cell assets from the active memory tilemap array down onto display space. |
-| `mget(x, y)` | Reads and returns the explicit structural tile ID index saved at the target cell row location on the map. |
-| `mset(x, y, v)` | Modifies the target tile index mapping slot inside the active structural map grid array block. |
-| `pal(c0, c1)` | Updates a dynamic lookup map entry, re-routing pixel index pipelines downstream during hardware composition. |
-| `pal()` | Reinitializes the dynamic color routing index mapping array back to native hardware standards. |
-| `clip(x, y, w, h)` | Establishes a hardware scissor bounding rectangle mask protecting pixel buffer write segments. |
-| `camera(x, y)` | Injects an axis shift displacement vector altering world-space render calculations for subsequent calls. |
-| `print(str, x, y, color)` | Blits text elements down into pixel buffers utilizing a pure 3x5 matrix bitmask binary lookup font engine. |
-
-### Peripherals and Input Subsystem
-
-| Function Signature | Technical Description |
-| :--- | :--- |
-| `btn(button_index)` | Polls and returns the active physical state boolean flag of a virtual controller index registry. |
-
-### Audio and Synthesis Subsystem (Phase 2)
-
-| Function Signature | Technical Description |
-| :--- | :--- |
-| `sfx(n, channel)` | Fires a real-time procedural oscillator wave (Sine, Square, Triangle, or Sawtooth) down an active mixer pipeline. |
-| `music(track)` | Coordinates background loop audio pattern generation streams over the virtual tracker channels (*In active development*). |
-
-### Engine Persistence and State Systems
-
-| Function Signature | Technical Description |
-| :--- | :--- |
-| `save_game(slot)` | Dumps a comprehensive binary copy of memory matrices and state flags out into structured static JSON storage files. |
-| `load_game(slot)` | Parses existing persistence JSON save states, restoring system positions, buffers, and flags immediately. |
+### Native Hardware Colors Index Mapping
+```text
+[0] #000000  [1] #1D2B53  [2] #7E2553  [3] #008751
+[4] #AB5236  [5] #5F574F  [6] #C2C3C7  [7] #FFF1E8
+[8] #FF004D  [9] #FFA300  [A] #FFEC27  [B] #00E436
+[C] #29ADFF  [D] #83769C  [E] #FF77A8  [F] #FFCCAA
+```
 
 ---
 
-## Supported Storage File Formats
+## Runtime API Surface (Dual-Core Matrix)
 
-### 1. Primary Text Layout Configuration: `.p8` Files
-Cartridges are managed via plain-text files using explicit header brackets to section off virtual hardware fields:
-*   `__lua__`: Houses the complete raw game program source logic.
-*   `__gfx__`: Holds hexadecimal row character strings (0-f) that decode down into sprite color matrices.
-*   `__map__`: Layout data arrays mapping matrix cell tile configurations for world scenarios.
+### Graphical Rasterization Core
 
-### 2. Compressed Binary Steganographic Format: `.p8.png` Files
-A retro data storage mechanism where game scripts and asset streams are distributed hidden invisibly within the two least significant bits (LSB) of color channels inside a regular 160×205 pixel PNG image shell.
+| Function Signature | Subsystem Behaviour & Calculations |
+| :--- | :--- |
+| `cls(color)` | Flushes target coordinate layers with an implicit color index respecting scissors. |
+| `pset(x, y, color)` | Injects a color index downstream after evaluating world-space offsets and active clipping boundaries. |
+| `line(x0, y0, x1, y1, color)` | Evaluates and plots linear pixel steps executing an unrolled CPU Bresenham's Line Algorithm. |
+| `circ(x, y, r, color)` | Renders a hollow circular perimeter utilizing Midpoint Integer Circle calculus. |
+| `circfill(x, y, r, color)` | Rasterizes a filled circle shape executing parallel symmetrical horizontal sweep lines. |
+| `spr(n, x, y, fx, fy)` | Blits a standard 8×8 graphic block applying safe index bounds-checking and coordinate reflection flags. |
+| `sspr(sx, sy, sw, sh, dx, dy, dw, dh, fx, fy)` | Scales variable asset sections down into the drawing buffer via pure *Nearest-Neighbor* layout interpolation. |
+| `rspr(n, dx, dy, angle, sx, sy)` | **Rotated Sprite:** Executes 360° trigonometric transformations using inverse coordinate sampling to eliminate gaps. |
+| `map(mx, my, sx, sy, w, h)` | Traverses structural memory cells, laying tile blocks onto the pixel matrix. |
+| `mget(x, y)` | Returns the unique tile ID index registered inside a specific map cell coordinate. |
+| `mset(x, y, v)` | Modifies the current tile ID index mapping entry located inside the target map grid slot. |
+| `pal(c0, c1)` | Updates the lookup table data stream, re-routing color indices on-the-fly during screen composition. |
+| `pal()` | Clears the look-up table re-routing array back to native hardware palette constants. |
+| `clip(x, y, w, h)` | Constructs an explicit hardware coordinate scissoring bounding-box protecting adjacent VRAM segments. |
+| `camera(x, y)` | Offsets the absolute drawing coordinates array calculation layer by injecting camera transformation vectors. |
+| `print(str, x, y, color)` | Decodes text strings into direct matrix graphics using a custom built-in 3x5 bitmask binary font engine. |
+
+### Peripherals & Input Management
+
+| Function Signature | Subsystem Behaviour & Calculations |
+| :--- | :--- |
+| `btn(button, [player])` | Polls the real-time boolean flag of a virtual controller mapping. Supports 4 players (`0` to `3`). |
+
+### Asynchronous Audio Mixer
+
+| Function Signature | Subsystem Behaviour & Calculations |
+| :--- | :--- |
+| `sfx(n, channel)` | Pipes a real-time procedural waveform command (Sine, Square, Triangle, Sawtooth) down to a separate audio thread mixer. |
+| `music(track)` | Synchronizes structural audio loop tracker patterns over available virtual audio streams. |
+
+### Structural Memory Operations
+
+| Function Signature | Subsystem Behaviour & Calculations |
+| :--- | :--- |
+| `save_game(slot)` | Serializes the state of virtual arrays, state flags, and memories directly into compressed local JSON assets. |
+| `load_game(slot)` | Parses existing persistence JSON save checkpoints, immediately restoring the virtual state registers. |
 
 ---
 
-## Architectural Engine Topology
+## File Layout Frameworks
+
+### 1. Plain-Text Layout Input: `.p8` Format
+Operates via explicit syntax bracket demarcations to separate virtual hardware modules:
+*   `__lua__`: Houses core software script game program state logic.
+*   `__gfx__`: Holds inline hexadecimal character data stream mappings (0-f) that decode down into sprite matrices.
+*   `__map__`: Layout tables housing grid index cell designations for constructing environment scenes.
+
+### 2. Compressed Steganographic Framework: `.p8.png` Format
+A compact distribution layer where game scripts and layout streams are embedded directly within the two least significant bits (LSB) of color channels inside a regular 160×205 PNG pixel layout canvas shell.
+
+---
+
+## Application Runtime Lifecycle Flow
+
+```text
+       Cold Boot Execution
+                │
+     ┌──────────▼──────────┐
+     │  _init() Lifecycle  │ ◄─── Once per environment initialization
+     └──────────┬──────────┘
+                │
+  ┌─────────────►─────────────┐
+  │                           │
+┌─┴───────────────────────────┴─┐
+│     _update() Loop (60Hz)     │ ◄─── Resolves network replication, button maps, logic
+└─┬───────────────────────────┬─┘
+  │                           │
+┌─▼───────────────────────────▼─┐
+│      _draw() Loop (60Hz)      │ ◄─── Compiles primitive geometry and outputs frame
+└─┬───────────────────────────┬─┘
+  │                           │
+  └─────────────◄─────────────┘
+```
+
+---
+
+## Architectural Topology Diagram
 
 ```text
 ┌────────────────────────────────────────────────────────┐
-│                   CLI Main Entry Point                 │
-│                      (src/main.rs)                     │
+│               Command Line Interface / CLI             │
+│                    (src/main.rs)                       │
 └──────────────────────────┬─────────────────────────────┘
                            │
 ┌──────────────────────────▼─────────────────────────────┐
@@ -94,45 +130,34 @@ A retro data storage mechanism where game scripts and asset streams are distribu
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │                  CartLoader                      │  │
-│  │  • Main syntax parser engine for the .p8 format  │  │
-│  │  • Section extractor loops (__lua__, __gfx__)    │  │
+│  │  • Automatic polymorphism: PICO-8 / TIC-80 checks│  │
+│  │  • LZ77 text desegmentation code restoration loop│  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │                    LuaVM                         │  │
-│  │  • Embedded Lua 5.4 platform instance via `mlua`│  │
-│  │  • Hardware bridge bindings injector middleware  │  │
-│  │  • Game lifestyle callback caller (_update,_draw)│  │
+│  │  • Embedded Lua 5.4 context platform standard    │  │
+│  │  • Mutex shared multi-player binding middleware  │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │               GraphicsRenderer                   │  │
-│  │  • SDL2 window engine scaled matrix canvas layer │  │
-│  │  • Stream converter maps Indexed Buffer -> RGB24 │  │
-│  │  • Core diagnostic overlay monitoring tools (F12)│  │
+│  │  • Dynamic widescreen viewport scaler (SDL2)     │  │
+│  │  • Pure CPU Software Rasterizer & Text blitter   │  │
+│  │  • Integrated In-Engine Tooling Suite (--edit)   │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
-│  │                 AudioEngine                      │  │
-│  │  • Asynchronous thread safe oscillators (44.1kHz)│  │
-│  │  • Non-blocking crossbeam channel command piping │  │
+│  │               NetworkSubsystem                   │  │
+│  │  • Non-blocking asynchronous UDP network sockets │  │
+│  │  • Bitmask compression input replication engine  │  │
 │  └──────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Application Runtime Lifecycle
+## Robustness & Security Constrains
 
-Game software scripts must register (or selectively choose to implement) these core environment hooks to drive the runtime:
-
-*   **`_init()`**: Fired once on cold bootup to set up variable baselines, states, arrays, and map modifications.
-*   **`_update()`**: Driven strictly 60 times a second to clear inputs, recalculate vectors, logic, and physics states.
-*   **`_draw()`**: Synchronized directly with native monitor refresh loops to clear layouts and commit graphics out to display space.
-
----
-
-## Exception Strategies and Memory Management
-
-*   **Syntax Compilation Flaws:** Safely intercept and log compilation or interpreter breakdowns cleanly via terminal crash output traps without locking physical operating system drivers.
-*   **Buffer Bounds Protection:** Out-of-bounds pixel positions or clipping parameter limits drop writes automatically without altering adjacent hardware indices, protecting native CPU stack footprints against indexing corruption.
+*   **Scissoring Integrity:** Virtual coordinate parameters injected outside bounds or current clipping rects are discarded safely on the CPU layer, completely locking out the possibility of heap memory overflow or stack memory corruption vulnerabilities during rendering.
+*   **Virtual VM Traps:** Execution loops broken by incorrect script syntax are halted cleanly by the Rust runtime environment, dumping structured crash logs back into the command line shell without blocking native desktop window environments.

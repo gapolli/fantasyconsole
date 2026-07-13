@@ -13,6 +13,7 @@ use fantasyconsole::audio::{
     AudioMixer, SoundChannel,
 };
 use fantasyconsole::cart::load_cartridge;
+use fantasyconsole::core::ConsoleMode;
 use fantasyconsole::vm::api::{inject_pico8_api, AudioCommand, BackendState};
 
 const P8_RGB: [(u8, u8, u8); 16] = [
@@ -37,11 +38,18 @@ const P8_RGB: [(u8, u8, u8); 16] = [
 fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        return Err("Uso: fantasyconsole <arquivo.p8>".to_string());
+        return Err("Uso: fantasyconsole <arquivo.p8/.tic>".to_string());
     }
     let file_path = &args[1];
 
-    let cartridge = load_cartridge(file_path).map_err(|e| e.to_string())?;
+    let loaded = load_cartridge(file_path).map_err(|e| e.to_string())?;
+    let cartridge = loaded.cartridge;
+    let current_mode = loaded.mode;
+
+    let (target_w, target_h) = match current_mode {
+        ConsoleMode::Pico8 => (128, 128),
+        ConsoleMode::Tic80 => (240, 136),
+    };
 
     let scale = 4u32;
     let sdl_context = sdl2::init()?;
@@ -49,7 +57,11 @@ fn main() -> Result<(), String> {
     let audio_subsystem = sdl_context.audio()?;
 
     let window = video_subsystem
-        .window("FantasyConsole", 128 * scale, 128 * scale)
+        .window(
+            "FantasyConsole",
+            target_w as u32 * scale,
+            target_h as u32 * scale,
+        )
         .position_centered()
         .build()
         .map_err(|e| e.to_string())?;
@@ -57,7 +69,7 @@ fn main() -> Result<(), String> {
     let mut canvas = window.into_canvas().build().map_err(|e| e.to_string())?;
     let texture_creator = canvas.texture_creator();
     let mut texture = texture_creator
-        .create_texture_streaming(PixelFormatEnum::RGB24, 128, 128)
+        .create_texture_streaming(PixelFormatEnum::RGB24, target_w as u32, target_h as u32)
         .map_err(|e| e.to_string())?;
 
     let desired_spec = AudioSpecDesired {
@@ -67,8 +79,8 @@ fn main() -> Result<(), String> {
     };
 
     let mut audio_device = audio_subsystem
-        .open_playback(None, &desired_spec, |spec| {
-            let sample_rate = spec.freq as f32;
+        .open_playback(None, &desired_spec, |_spec| {
+            let sample_rate = 44100.0;
             AudioMixer {
                 channels: [
                     SoundChannel {
@@ -102,41 +114,27 @@ fn main() -> Result<(), String> {
         Receiver<AudioCommand>,
     ) = unbounded();
 
-    let lua = mlua::Lua::new();
-    let state = Rc::new(RefCell::new(BackendState {
-        screen_buffer: vec![0u8; 128 * 128],
-        sprite_sheet: cartridge.sprite_sheet,
-        map_buffer: vec![0u8; 128 * 64],
-        palette_map: {
-            let mut p = [0u8; 16];
-            for i in 0..16 {
-                p[i] = i as u8;
-            }
-            p
-        },
-        debug_mode: false,
-        current_color: 6,
-        buttons: [false; 6],
-        camera_x: 0,
-        camera_y: 0,
-        clip_x0: 0,
-        clip_y0: 0,
-        clip_x1: 127,
-        clip_y1: 127,
-        audio_tx: Some(tx),
-    }));
+    let state = Rc::new(RefCell::new(BackendState::new(current_mode)));
+    state.borrow_mut().sprite_sheet[..cartridge.sprite_sheet.len()]
+        .copy_from_slice(&cartridge.sprite_sheet);
+    state.borrow_mut().audio_tx = Some(tx);
 
+    let lua = mlua::Lua::new();
     inject_pico8_api(&lua, Rc::clone(&state)).map_err(|e| e.to_string())?;
-    lua.load(&cartridge.lua_code)
-        .exec()
-        .map_err(|e| e.to_string())?;
+
+    // Captura e exibe erros de carregamento inicial do cartucho no terminal
+    if let Err(e) = lua.load(&cartridge.lua_code).exec() {
+        eprintln!("[Lua Load Error] {}", e);
+    }
 
     if let Ok(init_fn) = lua.globals().get::<_, mlua::Function>("_init") {
-        init_fn.call::<_, ()>(()).map_err(|e| e.to_string())?;
+        if let Err(e) = init_fn.call::<_, ()>(()) {
+            eprintln!("[Lua _init Error] {}", e);
+        }
     }
 
     let mut event_pump = sdl_context.event_pump()?;
-    let mut rgb_buffer = vec![0u8; 128 * 128 * 3];
+    let mut rgb_buffer = vec![0u8; (target_w * target_h * 3) as usize];
     let mut last_time = Instant::now();
     let frame_target = Duration::from_secs_f64(1.0 / 60.0);
 
@@ -154,14 +152,15 @@ fn main() -> Result<(), String> {
                     break 'running;
                 }
                 Event::KeyDown {
-                    keycode: Some(k), ..
+                    keycode: Some(k),
+                    repeat: false,
+                    ..
                 } => match k {
-                    Keycode::Left => state.borrow_mut().buttons[0] = true,
-                    Keycode::Right => state.borrow_mut().buttons[1] = true,
-                    Keycode::Up => state.borrow_mut().buttons[2] = true,
-                    Keycode::Down => state.borrow_mut().buttons[3] = true,
-                    Keycode::Z => state.borrow_mut().buttons[4] = true,
-                    Keycode::X => state.borrow_mut().buttons[5] = true,
+                    // Garante que o F12 inverta o estado apenas uma vez por clique físico
+                    Keycode::F12 => {
+                        let mut s = state.borrow_mut();
+                        s.debug_mode = !s.debug_mode;
+                    }
                     Keycode::F5 => {
                         state.borrow().save_state(1);
                         println!("Console Salvo!");
@@ -170,21 +169,42 @@ fn main() -> Result<(), String> {
                         state.borrow_mut().load_state(1);
                         println!("Console Restaurado!");
                     }
-                    Keycode::F12 => {
-                        let mut s = state.borrow_mut();
-                        s.debug_mode = !s.debug_mode;
-                    }
+
+                    // Jogador 0
+                    Keycode::Left => state.borrow_mut().buttons[0][0] = true,
+                    Keycode::Right => state.borrow_mut().buttons[0][1] = true,
+                    Keycode::Up => state.borrow_mut().buttons[0][2] = true,
+                    Keycode::Down => state.borrow_mut().buttons[0][3] = true,
+                    Keycode::Z => state.borrow_mut().buttons[0][4] = true,
+                    Keycode::X => state.borrow_mut().buttons[0][5] = true,
+
+                    // Jogador 1
+                    Keycode::A => state.borrow_mut().buttons[1][0] = true,
+                    Keycode::D => state.borrow_mut().buttons[1][1] = true,
+                    Keycode::W => state.borrow_mut().buttons[1][2] = true,
+                    Keycode::S => state.borrow_mut().buttons[1][3] = true,
+                    Keycode::C => state.borrow_mut().buttons[1][4] = true,
+                    Keycode::V => state.borrow_mut().buttons[1][5] = true,
                     _ => {}
                 },
                 Event::KeyUp {
                     keycode: Some(k), ..
                 } => match k {
-                    Keycode::Left => state.borrow_mut().buttons[0] = false,
-                    Keycode::Right => state.borrow_mut().buttons[1] = false,
-                    Keycode::Up => state.borrow_mut().buttons[2] = false,
-                    Keycode::Down => state.borrow_mut().buttons[3] = false,
-                    Keycode::Z => state.borrow_mut().buttons[4] = false,
-                    Keycode::X => state.borrow_mut().buttons[5] = false,
+                    // Jogador 0
+                    Keycode::Left => state.borrow_mut().buttons[0][0] = false,
+                    Keycode::Right => state.borrow_mut().buttons[0][1] = false,
+                    Keycode::Up => state.borrow_mut().buttons[0][2] = false,
+                    Keycode::Down => state.borrow_mut().buttons[0][3] = false,
+                    Keycode::Z => state.borrow_mut().buttons[0][4] = false,
+                    Keycode::X => state.borrow_mut().buttons[0][5] = false,
+
+                    // Jogador 1
+                    Keycode::A => state.borrow_mut().buttons[1][0] = false,
+                    Keycode::D => state.borrow_mut().buttons[1][1] = false,
+                    Keycode::W => state.borrow_mut().buttons[1][2] = false,
+                    Keycode::S => state.borrow_mut().buttons[1][3] = false,
+                    Keycode::C => state.borrow_mut().buttons[1][4] = false,
+                    Keycode::V => state.borrow_mut().buttons[1][5] = false,
                     _ => {}
                 },
                 _ => {}
@@ -216,31 +236,36 @@ fn main() -> Result<(), String> {
         if frame_duration >= frame_target {
             last_time = now;
 
+            // Execução segura da lógica sem congelar o laço em caso de quebra do Lua
             if let Ok(update_fn) = lua.globals().get::<_, mlua::Function>("_update") {
-                update_fn.call::<_, ()>(()).map_err(|e| e.to_string())?;
+                let _ = update_fn.call::<_, ()>(());
             }
             if let Ok(draw_fn) = lua.globals().get::<_, mlua::Function>("_draw") {
-                draw_fn.call::<_, ()>(()).map_err(|e| e.to_string())?;
+                let _ = draw_fn.call::<_, ()>(());
             }
 
             if state.borrow().debug_mode {
                 let mut s = state.borrow_mut();
                 let old_clip = (s.clip_x0, s.clip_y0, s.clip_x1, s.clip_y1);
                 let old_cam = (s.camera_x, s.camera_y);
-                s.clip(0, 0, 128, 128);
+
+                let cur_w = s.target_width;
+                let cur_h = s.target_height;
+                s.clip(0, 0, cur_w, cur_h);
                 s.camera(0, 0);
 
                 for y in 0..7 {
-                    for x in 0..128 {
-                        s.screen_buffer[y * 128 + x] = 5;
+                    for x in 0..cur_w {
+                        s.screen_buffer[(y * cur_w + x) as usize] = 5;
                     }
                 }
-                s.draw_text("FC v0.1", 2, 1, 6); // Cinza claro (cor 6)
+
+                s.draw_text("FC v0.1", 2, 1, 6);
 
                 let current_fps = (1.0 / frame_duration.as_secs_f64()).min(60.0);
                 let fps_text = format!("{:.0} FPS", current_fps);
                 let text_width = (fps_text.len() as i32 * 4) - 1;
-                let text_x = 126 - text_width;
+                let text_x = (cur_w - 2) - text_width;
 
                 let start_bar_x = 34;
                 let max_bar_x = text_x - 3;
@@ -249,7 +274,7 @@ fn main() -> Result<(), String> {
                 let bar_color = if current_fps >= 55.0 { 11 } else { 8 };
 
                 s.line(start_bar_x, 3, start_bar_x + bar_width, 3, bar_color);
-                s.draw_text(&fps_text, text_x, 1, 7); // Desenha métrica alinhada à direita
+                s.draw_text(&fps_text, text_x, 1, 7);
 
                 s.clip_x0 = old_clip.0;
                 s.clip_y0 = old_clip.1;
@@ -258,10 +283,13 @@ fn main() -> Result<(), String> {
                 s.camera_x = old_cam.0;
                 s.camera_y = old_cam.1;
             }
+
             {
                 let s = state.borrow();
-                for i in 0..(128 * 128) {
-                    let (r, g, b) = P8_RGB[s.screen_buffer[i] as usize];
+                let len = (target_w * target_h) as usize;
+                for i in 0..len {
+                    let color_idx = s.screen_buffer[i] as usize;
+                    let (r, g, b) = P8_RGB[color_idx & 0x0F];
                     rgb_buffer[i * 3] = r;
                     rgb_buffer[i * 3 + 1] = g;
                     rgb_buffer[i * 3 + 2] = b;
@@ -269,7 +297,7 @@ fn main() -> Result<(), String> {
             }
 
             texture
-                .update(None, &rgb_buffer, 128 * 3)
+                .update(None, &rgb_buffer, target_w as usize * 3)
                 .map_err(|e| e.to_string())?;
             canvas.clear();
             canvas.copy(&texture, None, None)?;

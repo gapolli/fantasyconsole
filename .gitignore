@@ -1,39 +1,42 @@
-# Build artifacts
+# =========================================================================
+# FantasyConsole - Integrated Version Control Ignore Manifest (.gitignore)
+# =========================================================================
+
+# --- Rust Compilation Artifacts & Build Outputs ---
 /target/
+/debug/
+Cargo.lock
 cargo-leaves.lock
+**/*.rs.bk
 
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
+# --- Commit Isolation Rules (Explicit Media & Sandbox Exclusion) ---
+# Strictly block the entire examples workspace directory from being staged
+/examples/
 
-# OS files
-.DS_Store
-Thumbs.db
+# Globally ignore loose script assets, cartridge buffers, and screenshots
+*.p8
+*.tic
+*.lua
+*.png
 
-# Logs
-*.log
-
-# Environment
-.env
-.env.local
-
-# Temporary files
-tmp/
-*.tmp
-
-# Test fixtures with actual game content
+# --- Test Fixtures Rules ---
 tests/fixtures/*.p8
 !tests/fixtures/.gitkeep
 
-# Debug builds
-debug/
-target/
+# --- Environment & Configuration Secrets ---
+.env
+.env.local
+.vscode/
+.idea/
 
-# Test files
-*.p8.png
-*.p8
-*.png
-*.json
+# --- System, Backup & OS Files ---
+.DS_Store
+Thumbs.db
+*~
+
+# --- Temporary & Local Editor Buffers ---
+tmp/
+*.tmp
+*.log
+*.swp
+*.swo
