@@ -2,7 +2,7 @@
 
 ## Overview
 
-FantasyConsole is a polymorphic, open-source fantasy virtual machine and integrated development environment (IDE) built in Rust. It executes codebases matching both **PICO-8** (`.p8`) and **TIC-80** (`.tic`) specifications without infringing on intellectual property boundaries. The engine implements a decoupled software-rendered graphics rasterizer mapped onto a hardware abstraction layer via an SDL2 backend.
+FantasyConsole is a polymorphic, open-source fantasy virtual machine and integrated development environment (IDE) built in Rust. It executes codebases matching **PICO-8** (`.p8`), **TIC-80** (`.tic`) specifications, and its own proprietary, compiled binary format (`.fc`) without infringing on intellectual property boundaries. The engine implements a decoupled software-rendered graphics rasterizer mapped onto a hardware abstraction layer via an SDL2 backend.
 
 **Version:** 0.1.0-dev  
 **License:** MIT  
@@ -12,18 +12,18 @@ FantasyConsole is a polymorphic, open-source fantasy virtual machine and integra
 
 ## Hardware Architecture & Constraints
 
-The engine dynamically reshapes its core structural allocations at boot time depending on the loaded cartridge metadata criteria:
+The engine dynamically reshapes its core structural allocations at boot time depending on the loaded cartridge metadata criteria or native binary chunk headers:
 
-| Parameter | PICO-8 Core Mode Specification | TIC-80 Core Mode Specification |
-| :--- | :--- | :--- |
-| **Display Resolution** | 128×128 pixels (1:1 Ratio) | **240×136 pixels** (16:9 Widescreen Ratio) |
-| **Color Lookup (LUT)** | 16 fixed indexed slots | **16 fully custom dynamic RAM registers** |
-| **Addressable VRAM** | 8 KB screen buffer array | 16.32 KB screen buffer array |
-| **Graphics Asset Sheet**| 128×128 pixel sprite matrix | **Dual-bank 128×256 pixel asset matrix** |
-| **Tilemap Array Bounds**| 128×64 matrix block cells | **240×136 matrix block cells** |
-| **Input Hardware Caps** | 4 local/remote players × 6 buttons | 4 local/remote players × 6 buttons |
-| **Virtual Address Space**| 32 KB structural layout mapping | 96 KB linear memory mapping layout |
-| **Target Refresh Rate** | Stable 60 Frames Per Second (FPS) | Stable 60 Frames Per Second (FPS) |
+| Parameter | PICO-8 Core Mode Specification | TIC-80 Core Mode Specification | Native Binary Core Mode (`.fc`) |
+| :--- | :--- | :--- | :--- |
+| **Display Resolution** | 128×128 pixels (1:1 Ratio) | 240×136 pixels (16:9 Widescreen Ratio) | Dynamic (Inherited via 1-Byte Header Flag: `0x00`=P8, `0x01`=TIC) |
+| **Color Lookup (LUT)** | 16 fixed indexed slots | 16 fully custom dynamic RAM registers | 16 indexed slots (with fallback to core constants) |
+| **Addressable VRAM** | 8 KB screen buffer array | 16.32 KB screen buffer array | Dynamic adaptation based on core mode header |
+| **Graphics Asset Sheet**| 128×128 pixel sprite matrix | Dual-bank 128×256 pixel asset matrix | Up to 256×256 maximum addressable pixel matrix |
+| **Tilemap Array Bounds**| 128×64 matrix block cells | 240×136 matrix block cells | 240×136 polymorphic matrix layout cells |
+| **Input Hardware Caps** | 4 local players × 6 buttons | 4 local players × 6 buttons | 4 local players × 6 buttons (matrix storage layout) |
+| **Virtual Address Space**| 32 KB structural layout mapping | 96 KB linear memory mapping layout | Flexible chunked container serialization boundaries |
+| **Target Refresh Rate** | Stable 60 Frames Per Second (FPS) | Stable 60 Frames Per Second (FPS) | Stable 60 Frames Per Second (FPS) |
 
 ### Native Hardware Colors Index Mapping
 ```text
@@ -44,8 +44,12 @@ The engine dynamically reshapes its core structural allocations at boot time dep
 | `cls(color)` | Flushes target coordinate layers with an implicit color index respecting scissors. |
 | `pset(x, y, color)` | Injects a color index downstream after evaluating world-space offsets and active clipping boundaries. |
 | `line(x0, y0, x1, y1, color)` | Evaluates and plots linear pixel steps executing an unrolled CPU Bresenham's Line Algorithm. |
+| `rect(x0, y0, x1, y1, color)` | **Hollow Rectangle:** Renders four structural outer border edges utilizing high-performance horizontal and vertical scanlines. |
+| `rectfill(x0, y0, x1, y1, color)` | **Filled Rectangle:** Executes an optimized CPU horizontal scanline filling block routine, bounding area against active clip registers. |
 | `circ(x, y, r, color)` | Renders a hollow circular perimeter utilizing Midpoint Integer Circle calculus. |
 | `circfill(x, y, r, color)` | Rasterizes a filled circle shape executing parallel symmetrical horizontal sweep lines. |
+| `polygon(cx, cy, r, s, a, c)` | **Regular Polygon:** Generates s-sided shapes (≥ 3) using polar coordinates trigonometry, interlinking vertices via Bresenham steps. |
+| `polyfill(cx, cy, r, s, a, c)` | **Filled Polygon:** Performs premium scanline filling by sorting horizontal edge intersection points (x-axis) sorted per vertical row (y). |
 | `spr(n, x, y, fx, fy)` | Blits a standard 8×8 graphic block applying safe index bounds-checking and coordinate reflection flags. |
 | `sspr(sx, sy, sw, sh, dx, dy, dw, dh, fx, fy)` | Scales variable asset sections down into the drawing buffer via pure *Nearest-Neighbor* layout interpolation. |
 | `rspr(n, dx, dy, angle, sx, sy)` | **Rotated Sprite:** Executes 360° trigonometric transformations using inverse coordinate sampling to eliminate gaps. |
@@ -68,7 +72,8 @@ The engine dynamically reshapes its core structural allocations at boot time dep
 
 | Function Signature | Subsystem Behaviour & Calculations |
 | :--- | :--- |
-| `sfx(n, channel)` | Pipes a real-time procedural waveform command (Sine, Square, Triangle, Sawtooth) down to a separate audio thread mixer. |
+| `sfx(n, channel, offset, length)` | Pipes a real-time single frequency procedural waveform command (Sine, Square, Triangle, Sawtooth) down to a separate audio thread mixer. |
+| `sfx_arpeggio(notes, channel, ms)`| **Arpeggiator Engine:** Transmits a dynamic array table of notes/frequencies down to an asynchronous thread, sequencing chords at 50ms ticks. |
 | `music(track)` | Synchronizes structural audio loop tracker patterns over available virtual audio streams. |
 
 ### Structural Memory Operations
@@ -91,6 +96,18 @@ Operates via explicit syntax bracket demarcations to separate virtual hardware m
 ### 2. Compressed Steganographic Framework: `.p8.png` Format
 A compact distribution layer where game scripts and layout streams are embedded directly within the two least significant bits (LSB) of color channels inside a regular 160×205 PNG pixel layout canvas shell.
 
+### 3. Native Chunked Binary Framework: `.fc` (Fantasy Console Standard)
+A compiled distribution container utilizing the `FCST` layout format specification. It strips plain-text parsing overhead by streaming immutable data payloads directly into hardware states via serialized chunks.
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ HEADERS: Magic Bytes "FCST" (4B) | Version (1B) | Console Mode Flag (1B)│
+├────────────────────────────────────────────────────────────────────────┤
+│ CHUNK 0x01 [CODE]:   1-Byte Identifier | 4-Byte Size (BE) | Lua String │
+├────────────────────────────────────────────────────────────────────────┤
+│ CHUNK 0x02 [SPRITE]: 1-Byte Identifier | 4-Byte Size (BE) | Raw Bytes  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## Application Runtime Lifecycle Flow
@@ -105,11 +122,11 @@ A compact distribution layer where game scripts and layout streams are embedded 
   ┌─────────────►─────────────┐
   │                           │
 ┌─┴───────────────────────────┴─┐
-│     _update() Loop (60Hz)     │ ◄─── Resolves network replication, button maps, logic
+│     _update() Loop (60Hz)     │ ◄─── Resolves crossbeam audio, network, inputs, logic
 └─┬───────────────────────────┬─┘
   │                           │
 ┌─▼───────────────────────────▼─┐
-│      _draw() Loop (60Hz)      │ ◄─── Compiles primitive geometry and outputs frame
+│      _draw() Loop (60Hz)      │ ◄─── Compiles primitive geometry, rects, polities
 └─┬───────────────────────────┬─┘
   │                           │
   └─────────────◄─────────────┘
@@ -131,6 +148,7 @@ A compact distribution layer where game scripts and layout streams are embedded 
 │  ┌──────────────────────────────────────────────────┐  │
 │  │                  CartLoader                      │  │
 │  │  • Automatic polymorphism: PICO-8 / TIC-80 checks│  │
+│  │  • Chunk Serialization: FCST Native Decoder (.fc) │  │
 │  │  • LZ77 text desegmentation code restoration loop│  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
@@ -138,13 +156,20 @@ A compact distribution layer where game scripts and layout streams are embedded 
 │  │                    LuaVM                         │  │
 │  │  • Embedded Lua 5.4 context platform standard    │  │
 │  │  • Mutex shared multi-player binding middleware  │  │
+│  │  • Asynchronous crossbeam channel messaging      │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │               GraphicsRenderer                   │  │
-│  │  • Dynamic widescreen viewport scaler (SDL2)     │  │
-│  │  • Pure CPU Software Rasterizer & Text blitter   │  │
+│  │  • Dynamic viewport scaler & frame-lock utility  │  │
+│  │  • Pure CPU Software Rasterizer & Vector Engine  │  │
 │  │  • Integrated In-Engine Tooling Suite (--edit)   │  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │               Asynchronous Audio Mixer           │  │
+│  │  • Sample-accurate real-time arpeggio tracking   │  │
+│  │  • Concurrent thread-safe SDL2 callback loop     │  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -159,5 +184,5 @@ A compact distribution layer where game scripts and layout streams are embedded 
 
 ## Robustness & Security Constrains
 
-*   **Scissoring Integrity:** Virtual coordinate parameters injected outside bounds or current clipping rects are discarded safely on the CPU layer, completely locking out the possibility of heap memory overflow or stack memory corruption vulnerabilities during rendering.
-*   **Virtual VM Traps:** Execution loops broken by incorrect script syntax are halted cleanly by the Rust runtime environment, dumping structured crash logs back into the command line shell without blocking native desktop window environments.
+*   **Scissoring & Palette Integrity:** Virtual coordinate parameters injected outside bounds or current clipping rects are discarded safely on the CPU layer. Color lookup table indexes are bit-masked (`color_idx & 0x0F`) during blitting, completely locking out the possibility of heap memory out-of-bounds read/write or stack memory corruption vulnerabilities during rendering.
+*   **Virtual VM Traps:** Execution loops broken by incorrect script syntax or malformed runtime arguments are caught and handled cleanly by the Rust runtime environment, dumping structured crash logs back into the command line shell without blocking native desktop window environments or panicking the main application thread.

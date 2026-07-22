@@ -4,16 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Build Status](https://github.com/gapolli/fantasyconsole/actions/workflows/rust.yml/badge.svg)](https://github.com/gapolli/fantasyconsole/actions)
 
-A modular, multi-environment fantasy console game engine and integrated development environment (IDE) written in Rust. It executes retro cartridges inspired by both **PICO-8** (`.p8`) and **TIC-80** (`.tic`) standards, powered by a high-performance CPU software rasterizer and a cross-platform SDL2 backend.
+A modular, multi-environment fantasy console game engine and integrated development environment (IDE) written in Rust. It executes retro cartridges inspired by **PICO-8** (`.p8`), **TIC-80** (`.tic`) standards, and its own high-performance chunk-based native binary format (`.fc`), powered by a high-performance CPU software rasterizer and a cross-platform SDL2 backend.
 
 ## ✨ Features
 
 *   ⚡ **High Performance Engine:** Core runtime written entirely in pure Rust, utilizing raw pixel streaming textures to secure a locked and stable 60 FPS update rate.
 *   🔀 **Polymorphic Dual-Core Architecture:** Dynamically adapts virtual hardware specs between the PICO-8 environment (128x128, 1:1 ratio) and the TIC-80 environment (240x136, 16:9 ratio, fully custom paletting).
+*   📦 **Native Binary Format (`.fc`):** Features a proprietary chunk-based serialization format (`FCST` specification) that bundles metadata, target console mode headers, code payloads, and custom assets directly into unified, compiled distributions.
+*   📐 **Vector & Software Rasterization:** Features an optimized scanline-filling renderer capable of drawing flat rectangles (`rect`/`rectfill`), full 360-degree sprite rotation (`rspr`), and n-sided regular polygons (`polygon`/`polyfill`) natively on the CPU.
+*   🎵 **Chiptune Synthesis & Arpeggiator:** Multi-waveform asynchronous procedural audio mixer featuring a real-time, sample-accurate circular arpeggiator engine for advanced retro melody sequencing.
 *   🛠️ **In-Engine Development Tooling:** Booting with the `--edit` flag unlocks native pixel-art creation suites directly inside the runtime, providing inline tools for sprite composition, map painting, and tracker audio editing.
-*   🌀 **Trigonometric Rotation & Compositing:** Features a native inverse-sampling software renderer capable of full 360-degree sprite rotation (`rspr`), sub-pixel scaling, lookup-table palette swapping, and multi-player axis flipping.
 *   📡 **Asynchronous Netcode Skeleton:** Includes non-blocking UDP network messaging layers built for ultra-low latency inputs replication, paving the way for multi-player rollback synchronization.
-*   📦 **Zero Configuration Deployment:** Standalone execution footprints utilizing statically bundled embedded SDL2 development libraries.
 
 ---
 
@@ -23,7 +24,14 @@ A modular, multi-environment fantasy console game engine and integrated developm
 
 *   Rust 1.70+ toolchain ([rustup.rs](https://rustup.rs))
 *   Native C compiler toolchain (GCC, Clang, or MSVC)
-*   SDL2 development libraries (optional if using automated static building configurations)
+*   `pkg-config` utility and `libsdl2-dev` libraries (for native system compilation bindings, especially on Linux distros like Debian 12)
+
+### Linux (Debian/Ubuntu) Setup
+
+```bash
+sudo apt update
+sudo apt install -y build-essential libsdl2-dev libsdl2-ttf-dev pkg-config cmake
+```
 
 ### Installation via Cargo
 
@@ -36,8 +44,8 @@ cargo install fantasyconsole
 ```bash
 git clone https://github.com/gapolli/fantasyconsole.git
 cd fantasyconsole
-cargo build --release
-./target/release/fantasyconsole <cart.p8>
+SDL_CONFIG=/usr/bin/sdl2-config cargo build --release
+./target/release/fantasyconsole <cart.p8/.fc>
 ```
 
 ---
@@ -47,8 +55,11 @@ cargo build --release
 ### Command Line Interface (CLI)
 
 ```bash
-# Launch a standard game cartridge file (PICO-8 or TIC-80)
+# Launch a standard plain-text cartridge file (PICO-8 or TIC-80)
 fantasyconsole game.p8
+
+# Launch a native, compiled chunk-based binary cartridge
+fantasyconsole game.fc
 
 # Open the Integrated Creation Suite (Sprite, Map, and Audio Editors)
 fantasyconsole --edit game.p8
@@ -77,6 +88,8 @@ fantasyconsole --debug game.p8
 | **Enter** | System Start Command |
 | **Escape** | System Menu / Safe Application Shutdown |
 | **F5** | Hot-Restart Cartridge Execution (*Soft Reset*) |
+| **F6** | Restore State Dump Layout (*Savestate Load*) |
+| **F7** | Compile current live execution environment into a native binary cartridge (`.fc`) |
 | **F12** | Toggle Real-Time Performance Diagnostics (*Debug Overlay*) |
 
 ---
@@ -86,23 +99,23 @@ fantasyconsole --debug game.p8
 ```text
 fantasyconsole/
 ├── src/
-│   ├── main.rs          # CLI entry point, ASCII font blitter, and hardware loops
+│   ├── main.rs          # CLI entry point, ASCII font blitter, hardware loops, and audio command unboxing
 │   ├── lib.rs           # Core library export root engine registry
 │   ├── cart/
-│   │   ├── mod.rs       # Cartridge loading management and automated format detection
-│   │   ├── loader.rs    # Syntactic plain-text parser engine for .p8 files
+│   │   ├── mod.rs       # Cartridge loading management and automated format detection router
+│   │   ├── loader.rs    # Plain-text .p8 parser and proprietary .fc chunk-based serialization engine
 │   │   └── png_loader.rs# LZ77 steganographic decoder for .p8.png image files
 │   ├── vm/
 │   │   ├── mod.rs       # Controller wrapper for the embedded Lua Virtual Machine
-│   │   └── api.rs       # Native environment bridges, 360 rspr mechanics, and API bindings
+│   │   └── api.rs       # Native environment bridges, polygon math, and core API Lua bindings
 │   ├── renderer/
 │   │   ├── mod.rs       # Graphical rendering abstract orchestration pipeline
 │   │   └── editor.rs    # Integrated sprite, tilemap, and chiptune audio creation interfaces
 │   ├── network/
 │   │   └── mod.rs       # Non-blocking asynchronous UDP network replication subsystem
 │   └── audio/
-│       ├── mod.rs       # Audio mixer backend stream manager orchestrator
-│       └── sfx.rs       # Multi-waveform procedural sound effects synthesizer
+│       ├── mod.rs       # Audio mixer callback manager and sample-accurate arpeggiator sequencer
+│       └── sfx.rs       # Multi-waveform procedural sound effects phase-driven synthesizer
 ├── examples/
 │   ├── games/           # Structured reference game script assets (.p8)
 │   └── images/          # Paired high-fidelity screen capture assets (.png)
@@ -117,7 +130,7 @@ fantasyconsole/
 
 ```bash
 # Rapid compilation running in development mode
-cargo build
+SDL_CONFIG=/usr/bin/sdl2-config cargo run -- game.p8
 
 # Highly optimized code compilation target ready for deployment (Release)
 cargo build --release
@@ -145,6 +158,7 @@ cargo clippy
 | **2** | Multi-channel audio mixer, procedural synthesis, and tilemaps | 🟢 Completed |
 | **3** | Dynamic steganographic LZ77 decoder and pure pixel ASCII engine | 🟢 Completed |
 | **4** | Polymorphic TIC-80 core integration and 360° software `rspr` | 🟢 Completed |
+| **4.5**| Native `.fc` chunk format, multi-note arpeggiator and vector APIs | 🟢 Completed |
 | **5** | In-Engine Tooling Suite (Native Sprite, Tilemap, and Sound Editors) | 🟡 In Progress |
 | **6** | Rollback input netcode synchronization over UDP sockets | ⚪ Planned |
 

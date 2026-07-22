@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and this project adheres to Semantic Versioning.
 
+## [0.1.0-dev] - 2026-07-22
+
+### Added
+- **Native Binary Container Specification (`.fc`):** Engineered a high-performance proprietary chunk-based serialization format utilizing the `FCST` structural layout protocol, enabling monolithic distribution of compiled game logic and asset blocks.
+- **Scanline-Optimized Vector Primitives:** Developed a software rasterizer for filled rectangles (`rectfill`) and regular convex n-sided polygons (`polyfill`) implementing sorted horizontal edge intersection points on the CPU.
+- **Hollow Geometric Boundaries APIs:** Added boundary-tracing APIs for hollow rectangles (`rect`) and rotational regular polygons (`polygon`) using an unrolled implementation over the core Bresenham line algorithm.
+- **Chiptune Arpeggiator Sequencer:** Built a sample-accurate, real-time circular chord sequencer inside the `AudioCallback` thread loop, capable of parsing dynamic multi-frequency tables from Lua at 50ms ticks.
+- **Asynchronous Audio Multi-frequency Payload:** Extended the `AudioCommand::PlaySfx` crossbeam-channel communication layer to transmit vector-based note packages safely between thread boundaries.
+- **Live Cartridge Packer Utility:** Injected a runtime physical compiler shortcut mapping on the `F7` hotkey, enabling immediate extraction and binary serialization of active execution data structures directly to disc.
+- **Linux Environment Portability:** Added formal support and initialization parameters to bypass CMake compilation overhead under Debian 12 by utilizing native system `pkg-config` hooks for SDL2 development binaries.
+
+### Fixed
+- Fixed a multi-threading data race condition by consolidating audio device mutex trancation (`lock()`) routines into a single atomic sequence per processed instruction.
+- Fixed VRAM array out-of-bounds corruption risks by implementing rigid bit-mask clamping (`color_idx & 0x0F`) on pixel index retrieval loops.
+- Fixed coordinate matrix calculation mismatches between the debug frame rate performance overlay and dynamic core viewport limits.
+- Silenced compiler warning logs regarding untracked virtual arguments inside plain-text syntax loops.
+
 ## [0.1.0-dev] - 2026-07-12
 
 ### Added

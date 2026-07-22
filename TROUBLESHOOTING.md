@@ -13,12 +13,30 @@ This guide offers solutions for architectural conflicts, compile-time errors, mu
 Ensure you have all necessary C development tooling, compilation packages, and native system graphics libraries installed via apt before attempting to compile the runtime:
 ```bash
 sudo apt update
-sudo apt install -y build-essential libsdl2-dev pkg-config
+sudo apt install -y build-essential libsdl2-dev libsdl2-ttf-dev pkg-config cmake
 ```
+
+### Issue: `sdl2-sys` build script failure caused by missing `cmake` tool
+**Error Symptoms:**
+- `failed to execute command: No such file or directory (os error 2)`
+- `is cmake not installed?`
+- `process didn't exit successfully ... sdl2-sys/build-script-build`
+
+**Solution:**
+By default, the `sdl2` crate tries to compile its own vendor version using CMake. If you are running on a clean Linux environment like Debian 12, you can either install CMake or force Cargo to link directly against the system-installed SDL2 libraries using `pkg-config`:
+
+*   **Option A (Recommended - Fast Link):** Prepend the native configuration path variable before building:
+    ```bash
+    SDL_CONFIG=/usr/bin/sdl2-config cargo run -- game.p8
+    ```
+*   **Option B (System Install):** Give the compiler the build utility it requested:
+    ```bash
+    sudo apt install -y cmake
+    ```
 
 ---
 
-## 2. Audio Engine Framework Failures
+## 2. Audio Engine & Arpeggiator Framework Failures
 
 ### Issue: Lua `sfx()` scripts trigger crashes or the virtual runtime boots completely silent
 **Error Symptoms:**
@@ -30,11 +48,32 @@ Verify that your global bindings match the signatures inside `src/vm/api.rs`. Ma
 use mlua::{Lua, Result, FromLua};
 ```
 
+### Issue: Variant `AudioCommand::PlaySfx` compile error after arpeggiator refactoring
+**Error Symptoms:**
+- `error[E0559]: variant AudioCommand::PlaySfx has no field named note`
+- `error[E0026]: variant PlaySfx does not have a field named note`
+
+**Cause:**
+This happens when you upgrade the audio subsystem to handle structural multi-frequency vector tables (`notes`) for chords, but old legacy single-note emitters (`sfx`) or event unboxers inside `main.rs` still attempt to map a singular `note: f32` parameter.
+
+**Solution:**
+*   **In `src/vm/api.rs` (SFX Binder):** Wrap the singular frequency variable into a native vector layout allocator:
+    ```rust
+    notes: vec![base_frequency]
+    ```
+*   **In `src/main.rs` (Event Loop Receiver):** Update the pattern matching structure to desubstitute `note` with `notes`, capture the lock safely, and stream the complete buffer to the sound channel array:
+    ```rust
+    AudioCommand::PlaySfx { channel, waveform, notes, duration_ms } => {
+        let mut lock = audio_device.lock();
+        lock.channels[channel].arpeggio_notes = notes;
+    }
+    ```
+
 ---
 
 ## 3. Local Sample File Path Incompatibilities
 
-### Issue: The application loads an static screen (black or cyan) with no graphic primitive steps visible
+### Issue: The application loads a static screen (black or cyan) with no graphic primitive steps visible
 **Cause:**
 This is commonly caused by path naming mismatches between the execution terminal shell argument and the actual localized workspace directories (such as feeding `exemplos/` instead of the configured english directory standard `examples/`), which prevents the `CartLoader` module from feeding the Lua VM environment.
 
@@ -61,7 +100,7 @@ socket.set_nonblocking(true)?;
 
 ---
 
-## 5. Lua Runtime Type-Casting Mismatches
+## 5. Lua Runtime Type-Casting & Memory Mismatches
 
 ### Issue: Rust compiler crashes on `mlua::create_function` multi-argument patterns
 **Error Symptoms:**
@@ -73,4 +112,14 @@ Do not capture Rust tuples raw directly inside function option wrappers. Interce
 let mut iter = args.into_iter();
 let val0 = iter.next().unwrap();
 let val1 = iter.next().unwrap();
+```
+
+### Issue: Vector rendering primitives crashing with array out-of-bounds index panics
+**Cause:**
+When writing fast CPU loops or injecting untrusted pixel colors from Lua scripts into primitive shaders like `rectfill` or `polyfill`, providing an arbitrary index beyond `15` will step outside the standard `P8_RGB` array stack limits.
+
+**Solution:**
+Enforce strict hardware-level bitmask wrapping constraints on the color value before querying index references inside your software blitter loop:
+```rust
+let mapped_color = self.palette_map[(color & 0x0F) as usize] & 0x0F;
 ```
