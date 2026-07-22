@@ -13,7 +13,7 @@ pub enum AudioCommand {
     PlaySfx {
         channel: usize,
         waveform: u8,
-        note: f32,
+        notes: Vec<f32>,
         duration_ms: u32,
     },
 }
@@ -797,6 +797,99 @@ pub fn inject_pico8_api(lua: &Lua, state: Rc<RefCell<BackendState>>) -> Result<(
                 let c = color.unwrap_or(state_mut.current_color);
                 let a = angle.unwrap_or(0.0);
                 state_mut.polyfill(cx, cy, radius, sides, a, c);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "sfx",
+        lua.create_function(
+            move |_, (sfx_id, channel_arg, offset, length): (i32, Option<i32>, Option<i32>, Option<i32>)| {
+                let state_ref = s.borrow();
+                
+                // Se o transmissor de áudio crossbeam não estiver configurado, aborta com segurança
+                let tx = match &state_ref.audio_tx {
+                    Some(t) => t,
+                    None => return Ok(()),
+                };
+
+                // Padrão inspirado em consoles de fantasia:
+                // Se o canal não for especificado (-1 ou None), escolhemos um automaticamente (ex: Canal 0)
+                let channel = match channel_arg {
+                    Some(c) => if c < 0 { 0 } else { c as usize & 3 }, // Limita entre os 4 canais físicos (0 a 3)
+                    None => 0,
+                };
+
+                // --- SISTEMA DE NOTAS E SÍNTESE PROVISÓRIA ---
+                // No futuro, sfx_id lerá dados de ondas pré-gravadas na RAM do console (Fase 5 - Sound Editor)
+                // Por enquanto, faremos o sfx_id atuar diretamente como um gerador de tom/frequência de teste:
+                let base_frequency = match sfx_id {
+                    0 => 220.0, // Nota Lá (A3) - Efeito de pulo/bip grave
+                    1 => 440.0, // Nota Lá (A4) - Bip padrão de clique
+                    2 => 880.0, // Nota Lá (A5) - Moeda/Item coletado (Agudo)
+                    _ => (sfx_id as f32 * 10.0).clamp(100.0, 2000.0), // Frequência dinâmica baseada no ID passado
+                };
+
+                // Escolhe formas de onda dinâmicas para testes audíveis baseadas no canal escolhido
+                let waveform = (channel as u8) % 4; // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth
+                let duration = length.unwrap_or(150) as u32; // Duração padrão em milissegundos se omitido
+
+                // Envia o comando via canal crossbeam para ser consumido de forma assíncrona no main.rs
+                let cmd = AudioCommand::PlaySfx {
+                    channel,
+                    waveform,
+                    notes: vec![base_frequency],
+                    duration_ms: duration,
+                };
+
+                let _ = tx.send(cmd);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "sfx_arpeggio", // Vamos criar uma função específica para o arpeggiator
+        lua.create_function(
+            move |_, (notes_table, channel_arg, duration_ms_arg): (mlua::Table, Option<i32>, Option<u32>)| {
+                let state_ref = s.borrow();
+                let tx = match &state_ref.audio_tx {
+                    Some(t) => t,
+                    None => return Ok(()),
+                };
+
+                let channel = match channel_arg {
+                    Some(c) => if c < 0 { 0 } else { c as usize & 3 },
+                    None => 0,
+                };
+
+                // Extrai a lista de frequências da tabela Lua
+                let mut notes = Vec::new();
+                for pair in notes_table.pairs::<i32, f32>() {
+                    if let Ok((_, freq)) = pair {
+                        notes.push(freq);
+                    }
+                }
+
+                // Fallback caso a tabela venha vazia
+                if notes.is_empty() {
+                    notes.push(440.0);
+                }
+
+                let duration = duration_ms_arg.unwrap_or(300);
+                let waveform = (channel as u8) % 4; // 0=Sine, 1=Square, 2=Triangle, 3=Sawtooth
+
+                let cmd = AudioCommand::PlaySfx {
+                    channel,
+                    waveform,
+                    notes, // Envia o vetor completo de notas
+                    duration_ms: duration,
+                };
+
+                let _ = tx.send(cmd);
                 Ok(())
             },
         )?,
