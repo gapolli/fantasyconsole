@@ -226,6 +226,184 @@ impl BackendState {
         }
     }
 
+    pub fn rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
+        // Ordena corretamente as coordenadas (min para max)
+        let start_x = x0.min(x1);
+        let end_x = x0.max(x1);
+        let start_y = y0.min(y1);
+        let end_y = y0.max(y1);
+
+        // Se o retângulo for apenas um ponto ou uma linha, simplifica usando pset ou line
+        if start_x == end_x && start_y == end_y {
+            self.pset(start_x, start_y, color);
+            return;
+        }
+
+        // Desenha as 4 bordas de forma otimizada usando scanlines horizontais e verticais diretas
+        // Borda superior e inferior (linhas horizontais)
+        self.line(start_x, start_y, end_x, start_y, color);
+        self.line(start_x, end_y, end_x, end_y, color);
+
+        // Borda esquerda e direita (linhas verticais - pulando os cantos já desenhados)
+        if end_y - start_y > 1 {
+            self.line(start_x, start_y + 1, start_x, end_y - 1, color);
+            self.line(end_x, start_y + 1, end_x, end_y - 1, color);
+        }
+    }
+    pub fn rectfill(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
+        // Garante que ordenamos corretamente as coordenadas (min para max)
+        let start_x = x0.min(x1);
+        let end_x = x0.max(x1);
+        let start_y = y0.min(y1);
+        let end_y = y0.max(y1);
+
+        // Aplica o deslocamento da câmera nas coordenadas
+        let cam_start_x = start_x - self.camera_x;
+        let cam_end_x = end_x - self.camera_x;
+        let cam_start_y = start_y - self.camera_y;
+        let cam_end_y = end_y - self.camera_y;
+
+        // Calcula a interseção entre o retângulo e os limites do CLIP e do hardware alvo
+        let clip_min_x = cam_start_x.max(self.clip_x0).max(0);
+        let clip_max_x = cam_end_x.min(self.clip_x1).min(self.target_width - 1);
+        let clip_min_y = cam_start_y.max(self.clip_y0).max(0);
+        let clip_max_y = cam_end_y.min(self.clip_y1).min(self.target_height - 1);
+
+        // Se o retângulo estiver completamente fora da tela recortada, aborta cedo
+        if clip_min_x > clip_max_x || clip_min_y > clip_max_y {
+            return;
+        }
+
+        // Resolve o índice de cor mapeado na paleta atual de hardware (0x0F limita a 16 cores)
+        let mapped_color = self.palette_map[(color & 0x0F) as usize] & 0x0F;
+
+        // Desenha linha por linha usando scanlines otimizadas
+        for y in clip_min_y..=clip_max_y {
+            let row_offset = (y * self.target_width) as usize;
+            for x in clip_min_x..=clip_max_x {
+                let idx = row_offset + x as usize;
+                self.screen_buffer[idx] = mapped_color;
+            }
+        }
+    }
+
+    pub fn polygon(&mut self, cx: i32, cy: i32, radius: i32, sides: i32, angle_rad: f32, color: u8) {
+        // Um polígono precisa de pelo menos 3 lados para existir
+        if sides < 3 || radius <= 0 {
+            return;
+        }
+
+        let mut prev_x = 0;
+        let mut prev_y = 0;
+        let mut first_x = 0;
+        let mut first_y = 0;
+
+        let sides_f = sides as f32;
+        let cx_f = cx as f32;
+        let cy_f = cy as f32;
+        let r_f = radius as f32;
+
+        for i in 0..=sides {
+            // Divide os 360 graus (2 * PI) uniformemente entre o número de lados
+            let current_angle = angle_rad + (i as f32 * 2.0 * std::f32::consts::PI) / sides_f;
+            
+            // Calcula a posição do vértice atual usando coordenadas polares
+            let x = (cx_f + current_angle.cos() * r_f).round() as i32;
+            let y = (cy_f + current_angle.sin() * r_f).round() as i32;
+
+            if i == 0 {
+                // Guarda o primeiro ponto para fechar o polígono no final
+                first_x = x;
+                first_y = y;
+            } else {
+                // Desenha a linha ligando o vértice anterior ao atual
+                self.line(prev_x, prev_y, x, y, color);
+            }
+
+            prev_x = x;
+            prev_y = y;
+        }
+
+        // Garante o fechamento perfeito do último lado voltando ao início
+        self.line(prev_x, prev_y, first_x, first_y, color);
+    }
+
+    pub fn polyfill(&mut self, cx: i32, cy: i32, radius: i32, sides: i32, angle_rad: f32, color: u8) {
+        if sides < 3 || radius <= 0 {
+            return;
+        }
+
+        // 1. Calcular e armazenar todos os vértices do polígono regular
+        let mut vertices = Vec::with_capacity(sides as usize);
+        let sides_f = sides as f32;
+        let cx_f = cx as f32;
+        let cy_f = cy as f32;
+        let r_f = radius as f32;
+
+        let mut min_y = self.target_height;
+        let mut max_y = 0;
+
+        for i in 0..sides {
+            let current_angle = angle_rad + (i as f32 * 2.0 * std::f32::consts::PI) / sides_f;
+            let x = (cx_f + current_angle.cos() * r_f).round() as i32;
+            let y = (cy_f + current_angle.sin() * r_f).round() as i32;
+            
+            vertices.push((x, y));
+
+            // Atualiza os limites verticais (AABB) do polígono para limitar a varredura
+            if y < min_y { min_y = y; }
+            if y > max_y { max_y = y; }
+        }
+
+        // Clipagem vertical rápida contra os limites físicos do hardware e do clip ativo
+        let scan_start = min_y.max(self.clip_y0).max(0);
+        let scan_end = max_y.min(self.clip_y1).min(self.target_height - 1);
+
+        if scan_start > scan_end {
+            return;
+        }
+
+        // 2. Loop de varredura por scanlines horizontais
+        let mut intersections = Vec::with_capacity(sides as usize);
+
+        for y in scan_start..=scan_end {
+            intersections.clear();
+
+            // Percorre todas as arestas do polígono
+            for i in 0..sides as usize {
+                let p1 = vertices[i];
+                let p2 = vertices[(i + 1) % sides as usize]; // Próximo vértice (fecha o loop)
+
+                // Verifica se a scanline horizontal atual cruza a aresta verticalmente
+                if (p1.1 <= y && p2.1 > y) || (p2.1 <= y && p1.1 > y) {
+                    // Evita divisão por zero se a linha for perfeitamente horizontal
+                    if p1.1 != p2.1 {
+                        // Interpolação linear para encontrar o valor exato de X na interseção
+                        let intersect_x = p1.0 + (y - p1.1) * (p2.0 - p1.0) / (p2.1 - p1.1);
+                        intersections.push(intersect_x);
+                    }
+                }
+            }
+
+            // 3. Ordena os pontos de interseção da esquerda para a direita (eixo X)
+            intersections.sort_unstable();
+
+            // 4. Desenha as linhas horizontais de preenchimento (pares de dentro do polígono)
+            for chunk in intersections.chunks_exact(2) {
+                let mut x0 = chunk[0];
+                let mut x1 = chunk[1];
+
+                // Clipagem horizontal manual rápida para a scanline atual
+                x0 = x0.max(self.clip_x0).max(0);
+                x1 = x1.min(self.clip_x1).min(self.target_width - 1);
+
+                if x0 <= x1 {
+                    self.line(x0, y, x1, y, color);
+                }
+            }
+        }
+    }
+
     pub fn spr_ext(&mut self, n: u32, sx: i32, sy: i32, flip_x: bool, flip_y: bool) {
         let s_x = (n % 16) * 8;
         let s_y = (n / 16) * 8;
@@ -568,6 +746,60 @@ pub fn inject_pico8_api(lua: &Lua, state: Rc<RefCell<BackendState>>) -> Result<(
             state_mut.circfill(x, y, r, c);
             Ok(())
         })?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "rect",
+        lua.create_function(
+            move |_, (x0, y0, x1, y1, color): (i32, i32, i32, i32, Option<u8>)| {
+                let mut state_mut = s.borrow_mut();
+                let c = color.unwrap_or(state_mut.current_color);
+                state_mut.rect(x0, y0, x1, y1, c);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "rectfill",
+        lua.create_function(
+            move |_, (x0, y0, x1, y1, color): (i32, i32, i32, i32, Option<u8>)| {
+                let mut state_mut = s.borrow_mut();
+                let c = color.unwrap_or(state_mut.current_color);
+                state_mut.rectfill(x0, y0, x1, y1, c);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "polygon",
+        lua.create_function(
+            move |_, (cx, cy, radius, sides, angle, color): (i32, i32, i32, i32, Option<f32>, Option<u8>)| {
+                let mut state_mut = s.borrow_mut();
+                let c = color.unwrap_or(state_mut.current_color);
+                let a = angle.unwrap_or(0.0);
+                state_mut.polygon(cx, cy, radius, sides, a, c);
+                Ok(())
+            },
+        )?,
+    )?;
+
+    let s = Rc::clone(&state);
+    globals.set(
+        "polyfill",
+        lua.create_function(
+            move |_, (cx, cy, radius, sides, angle, color): (i32, i32, i32, i32, Option<f32>, Option<u8>)| {
+                let mut state_mut = s.borrow_mut();
+                let c = color.unwrap_or(state_mut.current_color);
+                let a = angle.unwrap_or(0.0);
+                state_mut.polyfill(cx, cy, radius, sides, a, c);
+                Ok(())
+            },
+        )?,
     )?;
 
     let s = Rc::clone(&state);
