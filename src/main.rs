@@ -81,28 +81,24 @@ fn main() -> Result<(), String> {
     let mut audio_device = audio_subsystem
         .open_playback(None, &desired_spec, |_spec| {
             let sample_rate = 44100.0;
+            
+            // Macro interna ou função auxiliar para não repetir código na inicialização estática do array
+            let create_channel = || SoundChannel {
+                osc: Oscillator::new(sample_rate),
+                active: false,
+                remaining_samples: 0,
+                arpeggio_notes: Vec::new(),
+                current_note_idx: 0,
+                samples_per_tick: 2205, // Altera a nota a cada ~50ms
+                tick_counter: 0,
+            };
+
             AudioMixer {
                 channels: [
-                    SoundChannel {
-                        osc: Oscillator::new(sample_rate),
-                        active: false,
-                        remaining_samples: 0,
-                    },
-                    SoundChannel {
-                        osc: Oscillator::new(sample_rate),
-                        active: false,
-                        remaining_samples: 0,
-                    },
-                    SoundChannel {
-                        osc: Oscillator::new(sample_rate),
-                        active: false,
-                        remaining_samples: 0,
-                    },
-                    SoundChannel {
-                        osc: Oscillator::new(sample_rate),
-                        active: false,
-                        remaining_samples: 0,
-                    },
+                    create_channel(),
+                    create_channel(),
+                    create_channel(),
+                    create_channel(),
                 ],
             }
         })
@@ -234,19 +230,34 @@ fn main() -> Result<(), String> {
                 AudioCommand::PlaySfx {
                     channel,
                     waveform,
-                    note,
+                    notes, // Recebe o vetor de notas unificado
                     duration_ms,
                 } => {
+                    let mut lock = audio_device.lock();
+                    let chan = &mut lock.channels[channel];
+                    
                     let samples_to_play = ((44100.0 * duration_ms as f32) / 1000.0) as u32;
-                    audio_device.lock().channels[channel].osc.frequency = note;
-                    audio_device.lock().channels[channel].osc.waveform = match waveform {
+                    
+                    // Injeta a lista completa de notas para a thread do callback processar o arpeggio
+                    chan.arpeggio_notes = notes;
+                    chan.current_note_idx = 0;
+                    chan.tick_counter = 0;
+                    chan.samples_per_tick = 2205; // Altera a nota a cada ~50ms (2205 amostras a 44.1kHz)
+                    
+                    // Define a primeira frequência como tom inicial do oscilador
+                    if let Some(&first_note) = chan.arpeggio_notes.first() {
+                        chan.osc.frequency = first_note;
+                    }
+                    
+                    chan.osc.waveform = match waveform {
                         0 => Waveform::Sine,
                         1 => Waveform::Square,
                         2 => Waveform::Triangle,
                         _ => Waveform::Sawtooth,
                     };
-                    audio_device.lock().channels[channel].remaining_samples = samples_to_play;
-                    audio_device.lock().channels[channel].active = true;
+                    
+                    chan.remaining_samples = samples_to_play;
+                    chan.active = true;
                 }
             }
         }
