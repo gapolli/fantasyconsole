@@ -115,6 +115,8 @@ fn main() -> Result<(), String> {
     ) = unbounded();
 
     let state = Rc::new(RefCell::new(BackendState::new(current_mode)));
+    state.borrow_mut().target_width = target_w;
+    state.borrow_mut().target_height = target_h;
     state.borrow_mut().sprite_sheet[..cartridge.sprite_sheet.len()]
         .copy_from_slice(&cartridge.sprite_sheet);
     state.borrow_mut().audio_tx = Some(tx);
@@ -168,6 +170,22 @@ fn main() -> Result<(), String> {
                     Keycode::F6 => {
                         state.borrow_mut().load_state(1);
                         println!("Console Restaurado!");
+                    }
+                    Keycode::F7 => {
+                        let s = state.borrow();
+                        // Prepara a estrutura do cartucho atualizada com a RAM atual do sistema
+                        let updated_cartridge = fantasyconsole::cart::Cartridge {
+                            lua_code: cartridge.lua_code.clone(), // Mantém o script em execução
+                            sprite_sheet: s.sprite_sheet.clone(),  // Copia a folha de sprites modificada
+                        };
+                        
+                        // Determina o nome do arquivo de saída alterando a extensão para .fc
+                        let export_path = std::path::Path::new(file_path).with_extension("fc");
+                        
+                        match fantasyconsole::cart::loader::serialize_fc_file(&export_path, &updated_cartridge, current_mode) {
+                            Ok(_) => println!("Cartucho compilado com sucesso para: {:?}", export_path),
+                            Err(e) => eprintln!("[Erro de Exportação .fc] {}", e),
+                        }
                     }
 
                     // Jogador 0
