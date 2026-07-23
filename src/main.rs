@@ -135,6 +135,12 @@ fn main() -> Result<(), String> {
     let mut rgb_buffer = vec![0u8; (target_w * target_h * 3) as usize];
     let mut last_time = Instant::now();
     let frame_target = Duration::from_secs_f64(1.0 / 60.0);
+    let mut sprite_editor = fantasyconsole::renderer::editor::SpriteEditor::new();
+    let mut map_editor = fantasyconsole::renderer::editor::MapEditor::new();
+
+    #[derive(PartialEq)]
+    enum EditorMode { Jogo, Sprite, Mapa }
+    let mut modo_ativo = EditorMode::Jogo;
 
     'running: loop {
         let now = Instant::now();
@@ -183,6 +189,37 @@ fn main() -> Result<(), String> {
                             Err(e) => eprintln!("[Erro de Exportação .fc] {}", e),
                         }
                     }
+                    Keycode::F1 => {
+                        modo_ativo = if modo_ativo == EditorMode::Sprite { EditorMode::Jogo } else { EditorMode::Sprite };
+                        println!("Modo Alternado: Sprite");
+                    }
+                    Keycode::F2 => {
+                        modo_ativo = if modo_ativo == EditorMode::Mapa { EditorMode::Jogo } else { EditorMode::Mapa };
+                        println!("Modo Alternado: Mapa");
+                    }
+                    Keycode::LeftBracket => {
+                        if modo_ativo == EditorMode::Sprite {
+                            if sprite_editor.selected_sprite_id > 0 { sprite_editor.selected_sprite_id -= 1; }
+                        } else if modo_ativo == EditorMode::Mapa {
+                            if map_editor.current_tile_id > 0 { map_editor.current_tile_id -= 1; }
+                        }
+                    }
+                    Keycode::RightBracket => {
+                        if modo_ativo == EditorMode::Sprite {
+                            if sprite_editor.selected_sprite_id < 255 { sprite_editor.selected_sprite_id += 1; }
+                        } else if modo_ativo == EditorMode::Mapa {
+                            if map_editor.current_tile_id < 255 { map_editor.current_tile_id += 1; }
+                        }
+                    }
+                    Keycode::Z | Keycode::Space => {
+                        if modo_ativo == EditorMode::Mapa {
+                            let mut s = state.borrow_mut();
+                            // Injeta o ID do sprite selecionado diretamente na célula da VRAM do mapa!
+                            let tile_id = sprite_editor.selected_sprite_id as u8;
+                            s.mset(map_editor.camera_x, map_editor.camera_y, tile_id);
+                            println!("Bloco Carimbado via Rust em X:{} Y:{}", map_editor.camera_x, map_editor.camera_y);
+                        }
+                    }
 
                     // Jogador 0
                     Keycode::Left => state.borrow_mut().buttons[0][0] = true,
@@ -220,6 +257,19 @@ fn main() -> Result<(), String> {
                     Keycode::C => state.borrow_mut().buttons[1][4] = false,
                     Keycode::V => state.borrow_mut().buttons[1][5] = false,
                     _ => {}
+                },
+                // --- PROCESSAMENTO NATIVO DO MOUSE PARA O EDITOR ---
+                Event::MouseMotion { x, y, .. } => {
+                    let mut s = state.borrow_mut();
+                    // Converte a coordenada da janela SDL para a coordenada virtual da VRAM (dividindo pelo scale 4x)
+                    s.mouse_x = (x as u32 / 4) as i32;
+                    s.mouse_y = (y as u32 / 4) as i32;
+                }
+                Event::MouseButtonDown { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                    state.borrow_mut().mouse_left_clicked = true;
+                }
+                Event::MouseButtonUp { mouse_btn: sdl2::mouse::MouseButton::Left, .. } => {
+                    state.borrow_mut().mouse_left_clicked = false;
                 },
                 _ => {}
             }
@@ -265,54 +315,70 @@ fn main() -> Result<(), String> {
         if frame_duration >= frame_target {
             last_time = now;
 
-            // Execução segura da lógica sem congelar o laço em caso de quebra do Lua
-            if let Ok(update_fn) = lua.globals().get::<_, mlua::Function>("_update") {
-                let _ = update_fn.call::<_, ()>(());
-            }
-            if let Ok(draw_fn) = lua.globals().get::<_, mlua::Function>("_draw") {
-                let _ = draw_fn.call::<_, ()>(());
-            }
+            // --- REDIRECIONAMENTO DE RENDERIZAÇÃO DA IDE POLIMÓRFICA ---
+            match modo_ativo {
+                EditorMode::Sprite => {
+                    let mut s = state.borrow_mut();
+                    sprite_editor.update_and_render(&mut s);
+                }
+                EditorMode::Mapa => {
+                    let mut s = state.borrow_mut();
+                    // Sincroniza dinamicamente o tile ativo com o sprite selecionado
+                    map_editor.current_tile_id = sprite_editor.selected_sprite_id as u8;
+                    map_editor.update_and_render(&mut s);
+                }
+                EditorMode::Jogo => {
+                    // Execução segura da lógica sem congelar o laço em caso de quebra do Lua
+                    if let Ok(update_fn) = lua.globals().get::<_, mlua::Function>("_update") {
+                        let _ = update_fn.call::<_, ()>(());
+                    }
+                    if let Ok(draw_fn) = lua.globals().get::<_, mlua::Function>("_draw") {
+                        let _ = draw_fn.call::<_, ()>(());
+                    }
 
-            if state.borrow().debug_mode {
-                let mut s = state.borrow_mut();
-                let old_clip = (s.clip_x0, s.clip_y0, s.clip_x1, s.clip_y1);
-                let old_cam = (s.camera_x, s.camera_y);
+                    if state.borrow().debug_mode {
+                        let mut s = state.borrow_mut();
+                        let old_clip = (s.clip_x0, s.clip_y0, s.clip_x1, s.clip_y1);
+                        let old_cam = (s.camera_x, s.camera_y);
 
-                let cur_w = s.target_width;
-                let cur_h = s.target_height;
-                s.clip(0, 0, cur_w, cur_h);
-                s.camera(0, 0);
+                        let cur_w = s.target_width;
+                        let cur_h = s.target_height;
+                        s.clip(0, 0, cur_w, cur_h);
+                        s.camera(0, 0);
 
-                for y in 0..7 {
-                    for x in 0..cur_w {
-                        s.screen_buffer[(y * cur_w + x) as usize] = 5;
+                        for y in 0..7 {
+                            for x in 0..cur_w {
+                                s.screen_buffer[(y * cur_w + x) as usize] = 5;
+                            }
+                        }
+
+                        s.draw_text("FC v0.1", 2, 1, 6);
+
+                        let current_fps = (1.0 / frame_duration.as_secs_f64()).min(60.0);
+                        let fps_text = format!("{:.0} FPS", current_fps);
+                        let text_width = (fps_text.len() as i32 * 4) - 1;
+                        let text_x = (cur_w - 2) - text_width;
+
+                        let start_bar_x = 34;
+                        let max_bar_x = text_x - 3;
+                        let bar_space = max_bar_x - start_bar_x;
+                        let bar_width = (((current_fps / 60.0) * bar_space as f64) as i32).max(0);
+                        let bar_color = if current_fps >= 55.0 { 11 } else { 8 };
+
+                        s.line(start_bar_x, 3, start_bar_x + bar_width, 3, bar_color);
+                        s.draw_text(&fps_text, text_x, 1, 7);
+
+                        s.clip_x0 = old_clip.0;
+                        s.clip_y0 = old_clip.1;
+                        s.clip_x1 = old_clip.2;
+                        s.clip_y1 = old_clip.3;
+                        s.camera_x = old_cam.0;
+                        s.camera_y = old_cam.1;
                     }
                 }
+            } // Fim do match modo_ativo
 
-                s.draw_text("FC v0.1", 2, 1, 6);
-
-                let current_fps = (1.0 / frame_duration.as_secs_f64()).min(60.0);
-                let fps_text = format!("{:.0} FPS", current_fps);
-                let text_width = (fps_text.len() as i32 * 4) - 1;
-                let text_x = (cur_w - 2) - text_width;
-
-                let start_bar_x = 34;
-                let max_bar_x = text_x - 3;
-                let bar_space = max_bar_x - start_bar_x;
-                let bar_width = (((current_fps / 60.0) * bar_space as f64) as i32).max(0);
-                let bar_color = if current_fps >= 55.0 { 11 } else { 8 };
-
-                s.line(start_bar_x, 3, start_bar_x + bar_width, 3, bar_color);
-                s.draw_text(&fps_text, text_x, 1, 7);
-
-                s.clip_x0 = old_clip.0;
-                s.clip_y0 = old_clip.1;
-                s.clip_x1 = old_clip.2;
-                s.clip_y1 = old_clip.3;
-                s.camera_x = old_cam.0;
-                s.camera_y = old_cam.1;
-            }
-
+            // --- BLITTING UNIFICADO (Roda idêntico para o Jogo ou para os Editores) ---
             {
                 let s = state.borrow();
                 let len = (target_w * target_h) as usize;

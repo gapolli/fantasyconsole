@@ -1,3 +1,4 @@
+// src/network/mod.rs
 use std::net::UdpSocket;
 use std::io;
 
@@ -18,7 +19,7 @@ impl NetworkManager {
             socket,
             remote_address: remote_addr,
             is_server,
-        }
+        }) 
     }
 
     // Transmite o array de botões locais comprimido em bytes para a rede
@@ -39,7 +40,7 @@ impl NetworkManager {
     // Escuta pacotes de rede sem travar os frames por segundo da engine
     pub fn receive_remote_input(&self) -> io::Result<Option<[bool; 6]>> {
         let mut buffer = [0u8; 1];
-        match self.socket.recv_from(&mut mut buffer) {
+        match self.socket.recv_from(&mut buffer) {
             Ok((_amt, _src)) => {
                 let payload = buffer[0];
                 let mut remote_buttons = [false; 6];
