@@ -123,3 +123,40 @@ Enforce strict hardware-level bitmask wrapping constraints on the color value be
 ```rust
 let mapped_color = self.palette_map[(color & 0x0F) as usize] & 0x0F;
 ```
+
+---
+
+## 6. In-Engine IDE & Tooling Compilations
+
+### Issue: Compiler fails to resolve the `renderer` path during workspace instantiation
+**Error Symptoms:**
+- `error[E0433]: cannot find renderer in fantasyconsole`
+
+**Cause:**
+This happens because the sub-modules or folders containing the newly designed editor scripts lack explicit public linkage markers (`pub mod`) within the engine core entry points.
+
+**Solution:**
+*   **In `src/lib.rs`:** Force public exportation of the rendering folder module:
+    ```rust
+    pub mod renderer;
+    ```
+*   **In `src/renderer/mod.rs` (Create if missing):** Bridge the editor structures cleanly:
+    ```rust
+    pub mod editor;
+    ```
+
+### Issue: Cartridge blocks are stamped successfully to VRAM arrays but remain completely invisible inside the Map Editor
+**Cause:**
+This occurs due to order of execution overrides or untracked camera transformation vectors. If the `s.cls()` loop is triggered *after* or *below* the input processing blocks, or if the game's active camera registers are not flushed, tiles are either cleared by background layers or drawn completely out of the viewport bounds.
+
+**Solution:**
+*   **Order of Operations:** Ensure that screen flushing operations (`s.cls()`) are called at the absolute top of the `update_and_render` function.
+*   **Coordinate Blinding:** Explicitly force camera and clip variables back to absolute zero frames inside the editor rendering cycle before executing blitting commands:
+    ```rust
+    s.camera_x = 0;
+    s.camera_y = 0;
+    s.clip_x0 = 0;
+    s.clip_y0 = 0;
+    s.clip_x1 = s.target_width - 1;
+    s.clip_y1 = s.target_height - 1;
+    ```

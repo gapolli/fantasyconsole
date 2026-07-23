@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com),
 and this project adheres to Semantic Versioning.
 
+## [0.1.0-dev] - 2026-07-23
+
+### Added
+- **Integrated IDE Architecture:** Created `src/renderer/mod.rs` to structure the internal tools workspace pipeline registry, establishing a unified polling pipeline for native peripherals.
+- **Pixel-Art Canvas Editor Suite:** Fully implemented an in-engine Sprite Editor featuring a selectable 4x4 palette grid, dynamic 3x3 pixel crosshair mouse routing, and asset page scrolling via hotkeys (`[` and `]`).
+- **Queue-Based Flood Fill Shader:** Developed a high-performance, non-recursive (`VecDeque` queue-based) Flood Fill algorithm for the sprite painting bucket tool, completely eliminating risks of CPU stack overflows.
+- **Polymorphic Tilemap Editor Workspace (WIP):** Engineered the foundations for an interactive level design matrix (`MapEditor`) mapped directly onto the raw 240x136 VRAM `map_buffer` segment, featuring localized compass d-pad scroll steps.
+
+### Fixed
+- Fixed a compilation stoppage (`E0433`) by expanding module visibility to public scopes (`pub mod renderer`) inside the core registry API boundaries.
+- Fixed a critical syntax delimiter crash and double-mutable buffer reference conflicts inside the async UDP netcode skeleton (`src/network/mod.rs`).
+- Fixed visual occlusion artifacts inside the editor views by restructuring graphic state order, pushing `s.cls()` flushes to absolute top frames to prevent sotherring live canvas elements under background layouts.
+- Fixed matrix projection distortions on IDE tools by injecting coordinate blinders to reset camera arrays (`camera_x/y = 0`) and scissor registers before calling software primitive blitters.
+
 ## [0.1.0-dev] - 2026-07-22
 
 ### Added

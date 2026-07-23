@@ -105,6 +105,9 @@ A compiled distribution container utilizing the `FCST` layout format specificati
 │ CHUNK 0x01 [CODE]:   1-Byte Identifier | 4-Byte Size (BE) | Lua String │
 ├────────────────────────────────────────────────────────────────────────┤
 │ CHUNK 0x02 [SPRITE]: 1-Byte Identifier | 4-Byte Size (BE) | Raw Bytes  │
+├────────────────────────────────────────────────────────────────────────┤
+│ CHUNK 0x03 [MAP]:    1-Byte Identifier | 4-Byte Size (BE) | Raw Bytes  │
+│                      (*Active IDE serialization under construction*)   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -128,6 +131,11 @@ A compiled distribution container utilizing the `FCST` layout format specificati
 ┌─▼───────────────────────────▼─┐
 │      _draw() Loop (60Hz)      │ ◄─── Compiles primitive geometry, rects, polities
 └─┬───────────────────────────┬─┘
+  │                           │
+  │     [IDE Mode Active?]    │
+  ├───────────────────────────┤
+  │ 🟢 F1: Sprite Editor Loop │ ◄─── Full canvas painting & Flood Fill
+  │ 🟡 F2: Map Editor Loop    │ ◄─── Viewport navigation (*Under Construction*)
   │                           │
   └─────────────◄─────────────┘
 ```
@@ -164,6 +172,8 @@ A compiled distribution container utilizing the `FCST` layout format specificati
 │  │  • Dynamic viewport scaler & frame-lock utility  │  │
 │  │  • Pure CPU Software Rasterizer & Vector Engine  │  │
 │  │  • Integrated In-Engine Tooling Suite (--edit)   │  │
+│  │    - Sprite Workspace (PEN / BKT Tools)          │  │
+│  │    - Tilemap Workspace (WIP / Under Construction)│  │
 │  └──────────────────────────────────────────────────┘  │
 │                                                        │
 │  ┌──────────────────────────────────────────────────┐  │
@@ -182,7 +192,8 @@ A compiled distribution container utilizing the `FCST` layout format specificati
 
 ---
 
-## Robustness & Security Constrains
+## Robustness & Security Constraints
 
 *   **Scissoring & Palette Integrity:** Virtual coordinate parameters injected outside bounds or current clipping rects are discarded safely on the CPU layer. Color lookup table indexes are bit-masked (`color_idx & 0x0F`) during blitting, completely locking out the possibility of heap memory out-of-bounds read/write or stack memory corruption vulnerabilities during rendering.
+*   **IDE Mode Context Isolation:** When switching workspaces via `F1` or `F2`, the runtime forces an absolute hardware coordinate reset (`camera_x/y = 0`, `clip_x/y = max`), overriding active game-world states. This prevents residual matrix transformation vectors or out-of-bounds drawing steps from leaking into or breaking native interface layers.
 *   **Virtual VM Traps:** Execution loops broken by incorrect script syntax or malformed runtime arguments are caught and handled cleanly by the Rust runtime environment, dumping structured crash logs back into the command line shell without blocking native desktop window environments or panicking the main application thread.

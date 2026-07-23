@@ -13,7 +13,7 @@ A modular, multi-environment fantasy console game engine and integrated developm
 *   📦 **Native Binary Format (`.fc`):** Features a proprietary chunk-based serialization format (`FCST` specification) that bundles metadata, target console mode headers, code payloads, and custom assets directly into unified, compiled distributions.
 *   📐 **Vector & Software Rasterization:** Features an optimized scanline-filling renderer capable of drawing flat rectangles (`rect`/`rectfill`), full 360-degree sprite rotation (`rspr`), and n-sided regular polygons (`polygon`/`polyfill`) natively on the CPU.
 *   🎵 **Chiptune Synthesis & Arpeggiator:** Multi-waveform asynchronous procedural audio mixer featuring a real-time, sample-accurate circular arpeggiator engine for advanced retro melody sequencing.
-*   🛠️ **In-Engine Development Tooling:** Booting with the `--edit` flag unlocks native pixel-art creation suites directly inside the runtime, providing inline tools for sprite composition, map painting, and tracker audio editing.
+*   🛠️ **In-Engine Development Tooling:** Booting with the `--edit` flag unlocks native asset creation suites directly inside the runtime, providing inline tools for sprite composition (with queue-based Flood Fill) and standalone tilemap level design.
 *   📡 **Asynchronous Netcode Skeleton:** Includes non-blocking UDP network messaging layers built for ultra-low latency inputs replication, paving the way for multi-player rollback synchronization.
 
 ---
@@ -81,12 +81,16 @@ fantasyconsole --debug game.p8
 
 | Key Bind | Virtual Hardware Function |
 | :--- | :--- |
-| **Arrow Keys** | Player 1 Classic Directional D-Pad Controls |
+| **Arrow Keys** | Player 1 Classic Directional D-Pad Controls / Map Editor Focus Navigation |
 | **WASD Keys** | Player 2 Classic Directional D-Pad Controls |
-| **Z / X** | Player 1 Action Buttons (A / B) |
+| **Z / X** | Player 1 Action Buttons (A / B) / Map Editor Stamp Placement Command |
 | **C / V** | Player 2 Action Buttons (A / B) |
+| **Space** | Secondary Native Action Command / Alternative Tilemap Carimber |
+| **`[` / `]`** | Decrement / Increment currently active Sprite ID asset within the IDE Workspace |
 | **Enter** | System Start Command |
 | **Escape** | System Menu / Safe Application Shutdown |
+| **F1** | Toggle In-Engine **Sprite Editor** Workspace Canvas (Mouse & Palette Driven) |
+| **F2** | Toggle In-Engine **Map Editor** Workspace Canvas (**Work In Progress / Under Construction**) |
 | **F5** | Hot-Restart Cartridge Execution (*Soft Reset*) |
 | **F6** | Restore State Dump Layout (*Savestate Load*) |
 | **F7** | Compile current live execution environment into a native binary cartridge (`.fc`) |
@@ -99,7 +103,7 @@ fantasyconsole --debug game.p8
 ```text
 fantasyconsole/
 ├── src/
-│   ├── main.rs          # CLI entry point, ASCII font blitter, hardware loops, and audio command unboxing
+│   ├── main.rs          # CLI entry point, IDE routing layers, hardware loops, and audio command unboxing
 │   ├── lib.rs           # Core library export root engine registry
 │   ├── cart/
 │   │   ├── mod.rs       # Cartridge loading management and automated format detection router
@@ -107,10 +111,10 @@ fantasyconsole/
 │   │   └── png_loader.rs# LZ77 steganographic decoder for .p8.png image files
 │   ├── vm/
 │   │   ├── mod.rs       # Controller wrapper for the embedded Lua Virtual Machine
-│   │   └── api.rs       # Native environment bridges, polygon math, and core API Lua bindings
+│   │   └── api.rs       # Native environment bridges, mouse input registers, and core API Lua bindings
 │   ├── renderer/
-│   │   ├── mod.rs       # Graphical rendering abstract orchestration pipeline
-│   │   └── editor.rs    # Integrated sprite, tilemap, and chiptune audio creation interfaces
+│   │   ├── mod.rs       # Graphical rendering abstract orchestration pipeline and IDE public registry
+│   │   └── editor.rs    # Integrated sprite (with Flood Fill) and tilemap creation interface structures
 │   ├── network/
 │   │   └── mod.rs       # Non-blocking asynchronous UDP network replication subsystem
 │   └── audio/
@@ -159,7 +163,8 @@ cargo clippy
 | **3** | Dynamic steganographic LZ77 decoder and pure pixel ASCII engine | 🟢 Completed |
 | **4** | Polymorphic TIC-80 core integration and 360° software `rspr` | 🟢 Completed |
 | **4.5**| Native `.fc` chunk format, multi-note arpeggiator and vector APIs | 🟢 Completed |
-| **5** | In-Engine Tooling Suite (Native Sprite, Tilemap, and Sound Editors) | 🟡 In Progress |
+| **5** | In-Engine Tooling Suite (Native Sprite Editor) | 🟢 Completed |
+| **5.1**| In-Engine Tooling Suite (Tilemap Editor) | 🟡 Under Construction |
 | **6** | Rollback input netcode synchronization over UDP sockets | ⚪ Planned |
 
 ---
